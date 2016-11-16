@@ -1,0 +1,18 @@
+{
+  "name": "https",
+  "version": "1.0.0",
+  "description": "A HTTP File Server",
+  "main": "https.js",
+  "scripts": {
+    "test": "test"
+  },
+  "dependencies": {
+    "yargs": "^4.8.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cclp94/https.git"
+  },
+  "author": "Caio Paiva",
+  "license": "MIT"
+}
