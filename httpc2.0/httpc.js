@@ -113,10 +113,11 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
 
                 }else if(ackSynPk.type == 2){           // ACK
                     // Pop Cumulative ack from window
-                    removeFromWindow(ackSynPk.sequenceNumber);
-                }else if(ackSynPk.type == 4){           // FIN + ACK
-                    removeFromWindow(ackSynPk.sequenceNumber+1);
-                    console.log(ackSynPk.payload);
+                    if(ackSynPk.sequenceNumber > 0)
+                        removeFromWindow(ackSynPk.sequenceNumber);
+                    }else if(ackSynPk.type == 4){           // FIN + ACK
+                        removeFromWindow(ackSynPk.sequenceNumber);
+                        console.log(ackSynPk.payload);
                     var last = ackSynPk.copy()
                                     .setType(2)
                                     .setPayload('');
@@ -129,40 +130,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                     console.log(ackSynPk.payload);
                 }
             });
-
-
         });
-
-        // client.on('data', res => {
-        //     var ParsedResponse = res.toString().split('\r\n\r\n');
-        //     // Check status code for redirects 3XX
-        //     if(ParsedResponse[0].search(/HTTP\/1\.\d 3\d\d \w+\s?\w*\r\n/) != -1){
-        //         // Redirect works for absolute and relative redirections
-        //         if(argv.verbose){
-        //             console.log(ParsedResponse[0]);
-        //             console.log("\n");
-        //             console.log("REDIRECT\n");
-        //         }
-        //         var location = ParsedResponse[0].match(/Location: .+(?!\n)/)[0];
-        //         if(location){
-        //             location = (location.match(/\s.+/)[0]);
-        //             location = location.substring(1, location.length);
-        //         }
-        //         var redirectURL = url.parse((location.includes("http")? location : 'http://'+parsedURL.host+location));
-        //         client.end();
-        //         makeRequest(redirectURL);
-        //     }else{
-        //         if(argv.o){
-        //             fs.writeFileSync(argv.o, ParsedResponse[1]);
-        //         }else{
-        //             if(argv.verbose){
-        //                 console.log(ParsedResponse[0]);
-        //             }
-        //             console.log('\n'+ParsedResponse[1]);
-        //         }
-        //         client.end();
-        //     }
-        // });
     }
 
     function retransmit(seq){
@@ -189,7 +157,6 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                 sendPacket(pk, router);
             }, 1000)
         });
-        console.log("window has: "); console.log(window);
     }
     function startTransmittion(httpRequest, lastPack){
 

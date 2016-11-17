@@ -3,7 +3,13 @@
 const dgram = require('dgram');
 const socket = dgram.createSocket('udp4');
 const Packet = require('..//Packet');
+const url = require('url');
 const pjson = require('./package.json');
+
+var sequenceFollower = 0;
+const router = 'http://localhost:3000';
+var queue = [];
+var connectionStarted = false;
 
 const statusCode = {
     200   : {
@@ -122,39 +128,60 @@ function sendPacket(packet, destination){
     socket.send(packet.getBuffer(), dest.port, dest.hostname);
 }
 
-function addToQueue(pk, expected){
+function addToQueue(pk, expected, httpServer){
     if(queue.length === 0 || queue[queue.length-1].seq < pk.sequenceNumber){
         queue.push({
             seq : pk.sequenceNumber,
-            data : pk.payload
+            data : pk.payload,
+            address : pk.address,
+            port: pk.port,
+            isFIN: pk.type === 4 ? true : false
         });
         if(expected === true) sequenceFollower++;
         console.log("Queue has: "); console.log(queue);
-        return;
-    }
+    }else{
 
-    for(var i = queue.length - 1; i >= 0; i--){
-        if(queue[i].seq < pk.sequenceNumber || i === 0){
-            queue.splice((i == 0 ? 0 : i+1), 0, {
-                seq : pk.sequenceNumber,
-                data : pk.payload
-            });
-            if(expected === true){
-                var lastInOrder = sequenceFollower;
-                for(var j = (i!== 0 ? i+1 : 0); j < queue.length; j++){
-                    var lastInOrder = queue[j].seq;
-                    if(!queue[j+1] || queue[j+1].seq - queue[j].seq > 1)
-                        break;
+        for(var i = queue.length - 1; i >= 0; i--){
+            if(queue[i].seq < pk.sequenceNumber || i === 0){
+                queue.splice((i == 0 ? 0 : i+1), 0, {
+                    seq : pk.sequenceNumber,
+                    data : pk.payload
+                });
+                if(expected === true){
+                    var lastInOrder = sequenceFollower;
+                    for(var j = (i!== 0 ? i+1 : 0); j < queue.length; j++){
+                        var lastInOrder = queue[j].seq;
+                        if(!queue[j+1] || queue[j+1].seq - queue[j].seq > 1)
+                            break;
+                    }
+                    sequenceFollower = lastInOrder + 1;
+                    console.log("Queue has: "); console.log(queue);
                 }
-   sequenceFollower = lastInOrder + 1;
-                console.log("Queue has: "); console.log(queue);
-                return;
             }
         }
     }
+    if(expected)
+        checkDelivery(httpServer);
 }
 
+function checkDelivery(httpServer){
+    if(queue[queue.length-1].isFIN && queue[queue.length-1].seq === sequenceFollower -1){
+        var response = httpServer.deliverQueue();
+        var packet = (new Packet()).setType(4)
+                            .setAddress(queue[queue.length-1].address)
+                            .setPort(queue[queue.length-1].port)
+                            .setSequenceNumber(++sequenceFollower)
+                            .setPayload(response);
+        sendPacket(packet, router);
+        flush();
+    }
+}
 
+function flush(){
+    queue = [];
+    connectionStarted = false;
+    sequenceFollower = 0;
+}
 
 function httpServer(port, get, post, logger){
     httpServer.prototype.logger = logger ? function(){this.log()= function(){}} : logger;
@@ -166,7 +193,6 @@ function httpServer(port, get, post, logger){
         var address = socket.address();
         console.log(`server listening ${address.address}:${address.port}`);
     });
-     var connectionStarted = false;
     socket.on('message', (msg, rinfo) => {
 
         var ackSynPk = Packet.createFromBuffer(msg);
@@ -192,7 +218,12 @@ function httpServer(port, get, post, logger){
         }else if(ackSynPk.type == 3 && connectionStarted){
    console.log('here3');
             if(ackSynPk.sequenceNumber == sequenceFollower){
-                addToQueue(ackSynPk, true);
+                addToQueue(ackSynPk, true, this);
+                var packet = ackSynPk.copy()
+                            .setType(2)
+                            .setSequenceNumber(sequenceFollower)
+                            .setPayload('');
+                    sendPacket(packet, router);
             }else{
                 if(ackSynPk.sequenceNumber > sequenceFollower){
                     addToQueue(ackSynPk, false);
@@ -212,7 +243,7 @@ function httpServer(port, get, post, logger){
                                     .setSequenceNumber(++sequenceFollower)
                                     .setPayload(response);
                 sendPacket(packet, router);
-                connectionStarted = false;
+                flush();
             }else{
                 console.log('her54');
                  console.log(`server got: ${ackSynPk.sequenceNumber} expecting ${sequenceFollower}`);
