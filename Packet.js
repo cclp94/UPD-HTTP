@@ -82,3 +82,5 @@ Packet.copy = function (packet){
                 .setPort(packet.port)
                 .setPayload(packet.payload);
 };
+
+module.exports = Packet; 

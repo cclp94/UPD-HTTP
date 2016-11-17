@@ -3,7 +3,7 @@
 
 const dgram = require('dgram');
 const socket = dgram.createSocket('udp4');
-const Packet = require('../Packet/Packet');
+const Packet = require('../Packet');
 const yargs = require('yargs');
 const url = require('url');
 const fs = require('fs');
