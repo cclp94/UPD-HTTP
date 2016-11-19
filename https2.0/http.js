@@ -10,6 +10,8 @@ var sequenceFollower = 0;
 const router = 'http://localhost:3000';
 var queue = [];
 var connectionStarted = false;
+var httpReply;
+var closingConnection = false;
 
 const statusCode = {
     200   : {
@@ -123,8 +125,11 @@ var getDocumentType = function(code, path, body){
 }
 
 function sendPacket(packet, destination){
+    if(httpReply){
+        packet.setPayload(httpReply);
+    }
     var dest = url.parse(destination);
-
+    console.log("Sending packet #"+packet.sequenceNumber+ "type: "+packet.type);
     socket.send(packet.getBuffer(), dest.port, dest.hostname);
 }
 
@@ -166,21 +171,22 @@ function addToQueue(pk, expected, httpServer){
 
 function checkDelivery(httpServer){
     if(queue[queue.length-1].isFIN && queue[queue.length-1].seq === sequenceFollower -1){
-        var response = httpServer.deliverQueue();
-        var packet = (new Packet()).setType(4)
+        console.log("Send reply");
+        var packet = (new Packet()).setType(2)
                             .setAddress(queue[queue.length-1].address)
                             .setPort(queue[queue.length-1].port)
-                            .setSequenceNumber(++sequenceFollower)
-                            .setPayload(response);
+                            .setSequenceNumber(sequenceFollower)
+                            .setPayload(httpReply);
         sendPacket(packet, router);
-        flush();
+        httpServer.deliverQueue();
+        closingConnection = true;
     }
 }
 
 function flush(){
     queue = [];
-    connectionStarted = false;
     sequenceFollower = 0;
+    closingConnection = false;
 }
 
 function httpServer(port, get, post, logger){
@@ -198,23 +204,31 @@ function httpServer(port, get, post, logger){
         var ackSynPk = Packet.createFromBuffer(msg);
         console.log(`server got: ${ackSynPk.sequenceNumber} type ${ackSynPk.type} expecting ${sequenceFollower} and ${connectionStarted}`);
         if(ackSynPk.type === 0){
-            sequenceFollower = ackSynPk.sequenceNumber;
+            sequenceFollower = ackSynPk.sequenceNumber+1;
             if(!connectionStarted){
-                connectionStarted = true;
                 var packet = ackSynPk.copy()
                                 .setType(1)
-                                .setSequenceNumber(++sequenceFollower);
+                                .setSequenceNumber(sequenceFollower);
                 sendPacket(packet, router);
             }else{
                 var packet = ackSynPk.copy()
                                 .setType(1)
-                                .setSequenceNumber(++sequenceFollower);
+                                .setSequenceNumber(sequenceFollower);
                 sendPacket(packet, router);
             }
-        }else if(ackSynPk.type === 2 && connectionStarted){
+        }else if(ackSynPk.type === 2){
             console.log("here2");
-            if(ackSynPk.sequenceNumber == sequenceFollower++)
+            if(ackSynPk.sequenceNumber == sequenceFollower){
+                sequenceFollower++;
                 console.log("Connection Change");
+                connectionStarted = !connectionStarted;
+                if(closingConnection){
+                    clearInterval(queue[queue.length-1].timer);
+                }
+                if(!connectionStarted){
+                    flush();
+                } 
+            }
         }else if(ackSynPk.type == 3 && connectionStarted){
    console.log('here3');
             if(ackSynPk.sequenceNumber == sequenceFollower){
@@ -238,12 +252,14 @@ function httpServer(port, get, post, logger){
             if(ackSynPk.sequenceNumber === sequenceFollower){
                 // Deliver & clear ordered queue
                 console.log('here4');
-                var response = this.deliverQueue();
+                console.log("Send reply2");
                 var packet = ackSynPk.copy()
-                                    .setSequenceNumber(++sequenceFollower)
-                                    .setPayload(response);
+                                    .setType(2)
+                                    .setSequenceNumber(sequenceFollower)
+                                    .setPayload('');
                 sendPacket(packet, router);
-                flush();
+                httpReply = this.deliverQueue();
+                closingConnection = true;
             }else{
                 console.log('her54');
                  console.log(`server got: ${ackSynPk.sequenceNumber} expecting ${sequenceFollower}`);
@@ -257,6 +273,7 @@ function httpServer(port, get, post, logger){
                     sendPacket(packet, router);
             }
         }
+        console.log("SEQ NUMBER IS: "+sequenceFollower);
     });
 
     socket.bind(1234);
@@ -305,10 +322,26 @@ function httpServer(port, get, post, logger){
         }, '');
         console.log('Request:\n'+request + '\n');
         if(request.startsWith('GET'))
-            return that.get( socket, request);
+            httpReply =  that.get( socket, request);
         else if(request.startsWith('POST'))
-            return that.post(socket, request);
-        return that.sendReply(socket, "400");
+            httpReply = that.post(socket, request);
+        else
+            httpReply =  that.sendReply(socket, "400");
+
+        var packet = (new Packet()).setType(4)
+                            .setAddress(queue[queue.length-1].address)
+                            .setPort(queue[queue.length-1].port)
+                            .setSequenceNumber(++sequenceFollower)
+                            .setPayload(httpReply);
+
+        queue.push({
+            packet: packet,
+            timer: setInterval(function(){
+                console.log("RETRANSMIT");
+                sendPacket(packet, router);
+            }, 2000)
+        });
+        sendPacket(packet, router);
     }
 }
 

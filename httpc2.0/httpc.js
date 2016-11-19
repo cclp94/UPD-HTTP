@@ -92,9 +92,12 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                     .setPayload('jhkjhk');
             addToWindow(packet);
             sendPacket(packet, router);
+            var connection = false;
             socket.on('message', (msg, rinfo) => {
                 var ackSynPk = Packet.createFromBuffer(msg);
+                console.log(`client got: ${ackSynPk.sequenceNumber} type ${ackSynPk.type}`);
                 if(ackSynPk.type == 1){             // SYN + ACK
+                    connection = true;
                     removeFromWindow(ackSynPk.sequenceNumber);
                     ackSynPk = ackSynPk.setType(2)
                                     .setAddress(parsedURL.hostname)
@@ -111,21 +114,24 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                     addToWindow(FINPk);
                     sendPacket(FINPk, router);
 
-                }else if(ackSynPk.type == 2){           // ACK
+                }else if(ackSynPk.type == 2 && connection){           // ACK
                     // Pop Cumulative ack from window
                     if(ackSynPk.sequenceNumber > 0)
                         removeFromWindow(ackSynPk.sequenceNumber);
-                    }else if(ackSynPk.type == 4){           // FIN + ACK
-                        removeFromWindow(ackSynPk.sequenceNumber);
-                        console.log(ackSynPk.payload);
+                }else if(ackSynPk.type == 4 && connection){           // FIN + ACK
+                    removeFromWindow(ackSynPk.sequenceNumber);
+                    console.log(ackSynPk.payload);
+                    console.log("Sending last");
                     var last = ackSynPk.copy()
                                     .setType(2)
                                     .setPayload('');
                     // Send and don't add to window
                     sendPacket(last, router);
-                    socket.close();
+                    setTimeout(function(){
+                        socket.close();
+                    }, 5000 );
                     return;
-                }else if(ackSynPk.type == 5){           // NACK
+                }else if(ackSynPk.type == 5 && connection){           // NACK
                     retransmit(ackSynPk.sequenceNumber);
                     console.log(ackSynPk.payload);
                 }
@@ -154,8 +160,9 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
             seq : pk.sequenceNumber,
             packet : pk,
             timer: setInterval(function(){
+                console.log("RETRANSMIT");
                 sendPacket(pk, router);
-            }, 1000)
+            }, 2000)
         });
     }
     function startTransmittion(httpRequest, lastPack){
@@ -191,6 +198,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
     function sendPacket(packet, destination){
         var dest = url.parse(destination);
         var buffer = packet.getBuffer();
+        console.log("Sending packet #"+packet.sequenceNumber+ "type: "+packet.type);
         socket.send(buffer, 0, buffer.length, dest.port, dest.hostname);
     }
 
