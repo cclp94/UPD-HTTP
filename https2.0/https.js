@@ -17,6 +17,13 @@ function Logger(){
         console.log(message);
     });
 };
+
+var savedLog = console.log;
+console.log = function(msg){
+    if(argv.v){
+        savedLog.call(this, msg);
+    }
+}
 var logger = new Logger();
 
 var httpServer = new http(argv.p,

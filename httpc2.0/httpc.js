@@ -11,6 +11,13 @@ const fs = require('fs');
 const router = 'http://localhost:3000';
 var window = [];
 
+var log = console.log;
+console.log = function(msg, important){
+    if(argv.v || important){
+        log.call(this, msg);
+    }
+}
+
 // Command Line Usage
 const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-data] [-f file] URL [-o save reply to file]')
     // GET
@@ -120,16 +127,19 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                         removeFromWindow(ackSynPk.sequenceNumber);
                 }else if(ackSynPk.type == 4 && connection){           // FIN + ACK
                     removeFromWindow(ackSynPk.sequenceNumber);
-                    console.log(ackSynPk.payload);
+                    console.log("============================", true);
+                    console.log(ackSynPk.payload, true);
+                    console.log("============================", true);
                     console.log("Sending last");
                     var last = ackSynPk.copy()
                                     .setType(2)
                                     .setPayload('');
                     // Send and don't add to window
+                    connection = false;
                     sendPacket(last, router);
                     setTimeout(function(){
                         socket.close();
-                    }, 5000 );
+                    }, 2000 );
                     return;
                 }else if(ackSynPk.type == 5 && connection){           // NACK
                     retransmit(ackSynPk.sequenceNumber);
@@ -162,7 +172,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
             timer: setInterval(function(){
                 console.log("RETRANSMIT");
                 sendPacket(pk, router);
-            }, 2000)
+            }, 900)
         });
     }
     function startTransmittion(httpRequest, lastPack){
