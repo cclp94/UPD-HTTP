@@ -9,7 +9,11 @@ const url = require('url');
 const fs = require('fs');
 
 const router = 'http://localhost:3000';
-var window = [];
+const WINDOW_SIZE = 10;
+
+
+var window_buffer = [];
+var sendingQueue = [];
 
 // Command Line Usage
 const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-data] [-f file] URL [-o save reply to file]')
@@ -78,6 +82,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
 
     function makeRequest(parsedURL){
         var httpRequest = createHTTPMessage(argv, parsedURL);
+        console.log(httpRequest);
         // Hand shake
         socket.bind({
             address: 'localhost',
@@ -90,8 +95,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                     .setAddress(parsedURL.hostname)
                     .setPort(parsedURL.port)
                     .setPayload('jhkjhk');
-            addToWindow(packet);
-            sendPacket(packet, router);
+            addToSendingQueue(packet);
             var connection = false;
             socket.on('message', (msg, rinfo) => {
                 var ackSynPk = Packet.createFromBuffer(msg);
@@ -102,8 +106,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                     ackSynPk = ackSynPk.setType(2)
                                     .setAddress(parsedURL.hostname)
                                     .setPort(parsedURL.port);
-                    addToWindow(ackSynPk);
-                    sendPacket(ackSynPk, router);
+                    addToSendingQueue(ackSynPk);
                     // Connection estabilished
                     var seq = startTransmittion(httpRequest, ackSynPk);
                     // Send Close connection signal
@@ -111,8 +114,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                                     .setType(4)
                                     .setSequenceNumber(seq)
                                     .setPayload('');
-                    addToWindow(FINPk);
-                    sendPacket(FINPk, router);
+                    addToSendingQueue(FINPk);
 
                 }else if(ackSynPk.type == 2 && connection){           // ACK
                     // Pop Cumulative ack from window
@@ -141,22 +143,35 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
 
     function retransmit(seq){
         removeFromWindow(seq);
-        sendPacket(window[0].packet, router);
+        sendPacket(window_buffer[0].packet, router);
     }
 
     function removeFromWindow(seq){
         console.log("remove up to: " + seq);
-        for(var i in window){
-            if(window[i].seq <= seq-1){
-                clearInterval(window[i].timer);
-            }else if(window[i].seq == seq-1){
-                window = window.splice(i+1);
+        console.log('window size: ' + window_buffer.length+ 'queue size: '+sendingQueue.length);
+        if(window_buffer.length > 0 && seq < window_buffer[0].seq ) return;
+        console.log(window_buffer.reduce((result, cur)=>{return result += ', '+cur.seq}, ''));
+        for(var i in window_buffer){
+            if(window_buffer[i].seq <= seq-1){
+                clearInterval(window_buffer[i].timer);
+                console.log(window_buffer[i].seq + " cleared");
+            }
+            if(window_buffer[i].seq === seq-1){
+                console.log('here');
+                console.log('Before splice: '+window_buffer.reduce((result, cur)=>{return result += ', '+cur.seq}, ''));
+                window_buffer.splice(0, i+1);
+                console.log('Window now: '+window_buffer.reduce((result, cur)=>{return result += ', '+cur.seq}, ''));
+                var toSend = sendingQueue.splice(0 ,i+1);
+                for(var j in toSend){
+                    addToWindowAndSend(toSend[j]);
+                }
+                return;
             }
         }
     }
 
-    function addToWindow(pk){
-        window.push({
+    function addToWindowAndSend(pk){
+        window_buffer.push({
             seq : pk.sequenceNumber,
             packet : pk,
             timer: setInterval(function(){
@@ -164,11 +179,31 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                 sendPacket(pk, router);
             }, 2000)
         });
+        console.log('Sending '+ pk.sequenceNumber+ ' - buffer Length ' + window_buffer.length);
+        sendPacket(pk, router);
     }
+
+    function addToSendingQueue(pk){
+        if(window_buffer.length < WINDOW_SIZE){
+            addToWindowAndSend(pk);
+        }else
+            sendingQueue.push(pk);
+    }
+
     function startTransmittion(httpRequest, lastPack){
 
-        if(httpRequest.length > 1013)
-            httpRequest = httpRequest.match(/.{1,1013}/g);
+        if(httpRequest.length > 1013){
+            var packets = Math.floor(httpRequest.length/1013);
+            var rest = httpRequest.length % 1013;
+            console.log("Length: "+ httpRequest.length + ', packets: '+packets+ ', rest: '+rest);
+            var contents = [];
+            var i = 0;
+            for(i = 0; i <= packets-1; i++){
+                contents.push(httpRequest.substring(0 + (1013*i), 1013 + (1013*i)));
+            }
+            contents.push(httpRequest.substring(1013 + (1013*(packets-1))));
+            httpRequest = contents;
+        }
         var seq = lastPack.sequenceNumber + 1;
         if(typeof httpRequest == 'string'){
             var Pn = lastPack.copy()
@@ -176,9 +211,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                         .setSequenceNumber(seq++)
                         .setPayload(httpRequest);
 
-
-            addToWindow(Pn);
-            sendPacket(Pn, router);
+            addToSendingQueue(Pn);
         }else{
             for(var i in httpRequest){
                 var Pn = lastPack.copy()
@@ -186,9 +219,7 @@ const argv = yargs.usage('Usage: node $0 (get|post) [-v] (-h "k:v")* [-d inline-
                             .setSequenceNumber(seq++)
                             .setPayload(httpRequest[i]);
 
-
-                addToWindow(Pn);
-                sendPacket(Pn, router);
+                addToSendingQueue(Pn)
             }
         }
         return seq;

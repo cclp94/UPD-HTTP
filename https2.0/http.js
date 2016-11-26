@@ -143,14 +143,37 @@ function addToQueue(pk, expected, httpServer){
             isFIN: pk.type === 4 ? true : false
         });
         if(expected === true) sequenceFollower++;
-        console.log("Queue has: "); console.log(queue);
+        console.log("1. Queue has: "); console.log(queue.reduce((result, cur)=>{return result += ', '+cur.seq}, ''));
+    }else if(queue[0].seq > pk.sequenceNumber){
+        queue.unshift({
+            seq : pk.sequenceNumber,
+            data : pk.payload,
+            address : pk.address,
+            port: pk.port,
+            isFIN: pk.type === 4 ? true : false
+        });
+        if(expected === true){
+                    var lastInOrder = sequenceFollower;
+                    for(var j = 0; j < queue.length; j++){
+                        var lastInOrder = queue[j].seq;
+                        if(!queue[j+1] || queue[j+1].seq - queue[j].seq > 1)
+                            break;
+                    }
+                    sequenceFollower = lastInOrder + 1;
+                }
+        console.log("2. Queue has: "); console.log(queue.reduce((result, cur)=>{return result += ', '+cur.seq}, ''));
+
     }else{
 
         for(var i = queue.length - 1; i >= 0; i--){
-            if(queue[i].seq < pk.sequenceNumber || i === 0){
-                queue.splice((i == 0 ? 0 : i+1), 0, {
+            if(queue[i].seq === pk.sequenceNumber) return;
+            if(queue[i].seq < pk.sequenceNumber){
+                queue.splice((i+1), 0, {
                     seq : pk.sequenceNumber,
-                    data : pk.payload
+                    data : pk.payload,
+                    address : pk.address,
+                    port: pk.port,
+                    isFIN: pk.type === 4 ? true : false
                 });
                 if(expected === true){
                     var lastInOrder = sequenceFollower;
@@ -160,8 +183,9 @@ function addToQueue(pk, expected, httpServer){
                             break;
                     }
                     sequenceFollower = lastInOrder + 1;
-                    console.log("Queue has: "); console.log(queue);
                 }
+                console.log("3. Queue has: "); console.log(queue.reduce((result, cur)=>{return result += ', '+cur.seq}, ''));
+                break;
             }
         }
     }
@@ -300,7 +324,7 @@ function httpServer(port, get, post, logger){
         reply += docType.ContentDisposition ? 'Content-Disposition: ' + docType.ContentDisposition + '\r\n' : '';
         reply += 'Content-Length: ' + (body ? body.length + 4 : 0) + '\r\n';
         // body
-        reply+= '\r\n';
+        reply+= '\r\n\r\n';
         if(body){
             reply+= (typeof body === 'string' ? body : body.join('\r\n')) + '\r\n';
         }else{
