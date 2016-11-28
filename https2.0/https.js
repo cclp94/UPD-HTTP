@@ -28,7 +28,7 @@ var logger = new Logger();
 
 var httpServer = new http(argv.p,
     // GET Handler
-    function(socket, request){
+    function(request){
         var path = pathUtil.normalize('./'+request.split(' ')[1]);
         //   Can't resquest files outside directory'
         if(validPath(path)){
@@ -37,7 +37,7 @@ var httpServer = new http(argv.p,
                 stat = fs.statSync(argv.d+'/'+path);
             }catch(err){
                 logger.log("Request not found: Sending 404");
-                return this.sendReply(socket, "404");
+                return this.sendReply("404");
             }
             if(stat){
                 var content;
@@ -45,29 +45,32 @@ var httpServer = new http(argv.p,
                     content = fs.readFileSync(path).toString();
                 else if(stat.isDirectory())
                     content = fs.readdirSync(path);
-                return this.sendReply(socket, "200", content, path);
+                return this.sendReply("200", content, path);
             }else{
                 logger.log("Request not found: Sending 404");
-                return this.sendReply(socket, "404");
+                return this.sendReply("404");
             }
         }else{
             logger.log("Client trying to access invalid location: Sending 403");
-            return this.sendReply(socket, "403");
+            return this.sendReply("403");
         }
     },
     // POST Handler
-    function(socket, request){
+    function(request){
+        console.log(request);
         var path = pathUtil.normalize('/.'+request.split(' ')[1]);
         if(validPath(path)){
-            var body = request.split('\r\n\r\n')[1];
-            fs.writeFileSync(argv.d+'/'+path, body);
+            var body = request.split('\r\n\r\n');
+            body.splice(0,1);
+            body =  body.join('\n');
+            fs.writeFileSync(argv.d+'/'+path, request);
             var tmp = path.split('/');
             var pathDir = tmp.slice(0, tmp.length-1).join('/');
             console.log(pathDir);
             var dir = fs.readdirSync(pathUtil.resolve(argv.d+'/'+path, '..'));
-            return this.sendReply(socket, "201", dir);
+            return this.sendReply("201", dir);
         }else{
-            return this.sendReply(socket, "403");
+            return this.sendReply("403");
         }
     }, logger);
 
